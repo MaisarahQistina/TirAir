@@ -8,7 +8,9 @@
 #define RELAY_PIN 16   // Pin that connects the water valve via the relay
 #define RAIN_SENSOR_PIN 41  // Pin for the rain sensor
 #define SERVO_PIN 9         // Pin for controlling the servo
+#define WATER_LEVEL_PIN 36  // Analog pin for water level sensor
 #define TEMP_THRESHOLD 25.0  // Temperature threshold (in Celsius)
+#define WATER_LEVEL_THRESHOLD 500  // Analog threshold for water level
 
 const char* WIFI_SSID = "sarah";           
 const char* WIFI_PASSWORD = "abc12345";  
@@ -82,9 +84,9 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
 // Initialize components
 void setup() {
-  
   pinMode(RELAY_PIN, OUTPUT);      // Relay pin as output
   pinMode(RAIN_SENSOR_PIN, INPUT); // Rain sensor as input
+  pinMode(WATER_LEVEL_PIN, INPUT); // Water level sensor as input
   tap_servo.attach(SERVO_PIN);     // Attach the servo
   dht.begin();                     // Initialize the DHT11 sensor
   Serial.begin(115200);            // Initialize Serial communication for logging
@@ -141,33 +143,39 @@ void loop() {
     Serial.println("Rain not detected. Servo reset.");
   }
 
-  // Print the current temperature to the Serial Monitor for logging
+  // Read water level sensor
+  int water_level = analogRead(WATER_LEVEL_PIN);
+  bool lowWaterLevel = water_level < WATER_LEVEL_THRESHOLD;
+
+  // Print the current temperature and water level to the Serial Monitor for logging
   Serial.print("Temperature: ");
   Serial.print(t);
   Serial.println(" °C");
+  Serial.print("Water Level: ");
+  Serial.println(water_level);
 
-  // Control the solenoid valve based on the temperature threshold
-  if (t >= TEMP_THRESHOLD) {
+  // Control the solenoid valve based on temperature and water level
+  if (t >= TEMP_THRESHOLD && !lowWaterLevel) {
     // Open the valve (relay ON)
     digitalWrite(RELAY_PIN, HIGH);
-    Serial.println("Valve Opened - Temperature above threshold");
+    Serial.println("Valve Opened - Temperature above threshold and sufficient water");
     valveOpened = true;
-
   } else {
     // Close the valve (relay OFF)
     digitalWrite(RELAY_PIN, LOW);
-    Serial.println("Valve Closed - Temperature below threshold");
+    Serial.println(lowWaterLevel ? "Valve Closed - Low water level" : "Valve Closed - Temperature below threshold");
     valveOpened = false;
   }
 
-  // Publish temperature, humidity, and rain and valve status data to MQTT
+  // Publish temperature, humidity, rain, water level, and valve status data to MQTT
   float h = dht.readHumidity(); // Read humidity
   if (isnan(h)) {
     Serial.println("Failed to read humidity from DHT sensor!");
     return;
   }
   
-  sprintf(buffer, "Temperature: %.2f degree Celsius, Humidity: %.2f %%, Raining: %s, Valve: %s", t, h, isRaining ? "Yes" : "No", valveOpened ? "Opened" : "Closed");
+  sprintf(buffer, "Temperature: %.2f degree Celsius, Humidity: %.2f %%, Raining: %s, Water Level: %d, Valve: %s", 
+          t, h, isRaining ? "Yes" : "No", water_level, valveOpened ? "Opened" : "Closed");
   client.publish(MQTT_TOPIC, buffer);
   Serial.println(buffer);
 
